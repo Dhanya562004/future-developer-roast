@@ -395,37 +395,62 @@ Respond ONLY with a valid JSON object matching this exact schema:
 Make sure the JSON is 100% valid and free of markdown formatting outside of the json block.
 """
 
+    # Strategy 1: Try official google-genai SDK
     try:
-        # Try using modern google-genai library or direct REST endpoint
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.8, "responseMimeType": "application/json"}
-        }
-        res = requests.post(url, headers=headers, json=payload, timeout=12)
-        if res.status_code == 200:
-            res_data = res.json()
-            text_response = res_data['candidates'][0]['content']['parts'][0]['text']
-            # Clean text response if wrapped in markdown
-            text_cleaned = re.sub(r'```json\s*', '', text_response)
-            text_cleaned = re.sub(r'```\s*$', '', text_cleaned).strip()
-            parsed_json = json.loads(text_cleaned)
-            return parsed_json
-        else:
-            # Fallback to gemini 2.0 flash or fallback generator
-            url_2 = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-            res2 = requests.post(url_2, headers=headers, json=payload, timeout=12)
-            if res2.status_code == 200:
-                res_data = res2.json()
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        for model_name in ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                if response and response.text:
+                    text_cleaned = re.sub(r'```json\s*', '', response.text)
+                    text_cleaned = re.sub(r'```\s*$', '', text_cleaned).strip()
+                    return json.loads(text_cleaned)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Strategy 2: Try google-generativeai SDK
+    try:
+        import google.generativeai as genai_old
+        genai_old.configure(api_key=api_key)
+        for m in ['gemini-1.5-flash', 'gemini-2.0-flash']:
+            try:
+                model = genai_old.GenerativeModel(m)
+                response = model.generate_content(prompt)
+                if response and response.text:
+                    text_cleaned = re.sub(r'```json\s*', '', response.text)
+                    text_cleaned = re.sub(r'```\s*$', '', text_cleaned).strip()
+                    return json.loads(text_cleaned)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Strategy 3: Direct REST endpoint calls
+    try:
+        for model_endpoint in ['gemini-1.5-flash', 'gemini-2.0-flash']:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_endpoint}:generateContent?key={api_key}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.8, "responseMimeType": "application/json"}
+            }
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            if res.status_code == 200:
+                res_data = res.json()
                 text_response = res_data['candidates'][0]['content']['parts'][0]['text']
                 text_cleaned = re.sub(r'```json\s*', '', text_response)
                 text_cleaned = re.sub(r'```\s*$', '', text_cleaned).strip()
                 return json.loads(text_cleaned)
-    except Exception as e:
+    except Exception:
         pass
         
-    # If API call fails or times out, fallback seamlessly to heuristic engine
+    # If API calls fail or time out, fallback seamlessly to heuristic engine
     return generate_heuristic_roast(input_type, content, repo_info, savage_mode)
 
 # --- SIDEBAR & OPTIONS ---
@@ -443,7 +468,7 @@ with st.sidebar:
         
     st.markdown("---")
     st.markdown("#### 🔑 Gemini API Key (Optional)")
-    user_api_key = st.text_input("Paste API Key", type="password", placeholder="AIZA...", help="If left blank or omitted in secrets, smart fallback roast generator will be used automatically.")
+    user_api_key = st.text_input("Paste API Key", type="password", placeholder="AQ.Ab... or AIZA...", help="Supports all Gemini / Google AI key formats. If left blank, smart fallback engine is used.")
     
     final_api_key = get_api_key(user_api_key)
     if final_api_key:
